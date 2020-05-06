@@ -1,0 +1,312 @@
+/#
+/*
+CALL NULLID.MRT_CheckupBufferPoolBufferPool ();
+CALL NULLID.MRT_CheckupBufferPool (1, 5);
+
+--  call monreport.dbsummary(30);
+--  call monreport.pkgcache(10);
+--  call monreport.connection(10);
+*/
+
+/********************************************************************************************************************************
+*********************************************************************************************************************************
+
+    Autor: Raul Diego
+    E-mail: raul.oliveira@sicoob.com.br
+    Data criação: 24/07/2015
+    ->Descrição: MRT que mostra exatamente a SYSIBMADM.DB_SUMMARY, mas fazendo os deltas e mostrando dentro do intervalo de tempo 
+        que precisar. 
+    ->Modo de execuçao: Crie a proc e a execute, informando o tempo de espera entre as execuçoes em segundos e quantas repetiçoes.
+ 
+    Compatibilidade: DB2 LUW 10.1
+
+    Histórico:
+        - 00/00/0000: Historico de alteracao
+
+        
+*********************************************************************************************************************************
+********************************************************************************************************************************/
+
+CREATE OR REPLACE PROCEDURE NULLID.MRT_CheckupBufferPool
+     (IN v_Wait SMALLINT DEFAULT 5
+     ,IN v_Repetition SMALLINT DEFAULT 3)
+     
+     LANGUAGE SQL
+     RESULT SET 1
+
+P1: BEGIN
+ 
+    DECLARE v_RepetitionCount SMALLINT DEFAULT 1;
+    
+    DECLARE GLOBAL TEMPORARY TABLE SESSION.MRT_CheckupBufferPool AS (
+    SELECT T.*
+        ,CURRENT_TIMESTAMP AS DATAREGISTRO
+        ,1 AS RepetitionCount  
+    FROM TABLE(MON_GET_BUFFERPOOL(NULL, -2)) T
+    WHERE BP_NAME NOT LIKE 'IBMSYSTEM%'
+    ) DEFINITION ONLY
+           ON COMMIT DELETE ROWS
+           NOT LOGGED ON ROLLBACK DELETE ROWS
+           WITH REPLACE;
+         
+    WHILE v_RepetitionCount <= v_Repetition DO
+    
+        INSERT INTO SESSION.MRT_CheckupBufferPool
+        SELECT T.*
+              ,CURRENT_TIMESTAMP AS DATAREGISTRO
+              ,v_RepetitionCount AS RepetitionCount 
+        FROM TABLE(MON_GET_BUFFERPOOL(NULL, -2)) T
+        WHERE BP_NAME NOT LIKE 'IBMSYSTEM%'
+        ;        
+--        ,CURRENT_TIMESTAMP AS DATAREGISTRO
+--        ,v_RepetitionCount AS RepetitionCount    
+        SET v_RepetitionCount = v_RepetitionCount + 1;
+        
+        --CALL NULLID.WAITFOR(v_Wait);
+        CALL NULLID.WAITFOR_MRT(v_Wait, 'MRT_CheckupBufferPool');
+
+    END WHILE;    
+    
+P2: BEGIN
+
+    DECLARE cRet CURSOR WITH RETURN FOR
+--        SELECT * FROM SESSION.MRT_CheckupBufferPool;
+        WITH DIFF AS (
+        SELECT 
+                TO_CHAR(T1.DATAREGISTRO,'HH24:MI:SS') AS HorarioInicio
+                , TO_CHAR(T2.DATAREGISTRO,'HH24:MI:SS') AS HorarioFim
+                , T2.BP_NAME
+                , T2.AUTOMATIC
+                , T2.BP_CUR_BUFFSZ -- - T1.BP_CUR_BUFFSZ AS BP_CUR_BUFFSZ
+                , T2.DIRECT_READS - T1.DIRECT_READS AS DIRECT_READS
+                , T2.DIRECT_READ_REQS - T1.DIRECT_READ_REQS AS DIRECT_READ_REQS
+                , T2.DIRECT_WRITES - T1.DIRECT_WRITES AS DIRECT_WRITES
+                , T2.DIRECT_WRITE_REQS - T1.DIRECT_WRITE_REQS AS DIRECT_WRITE_REQS
+                , T2.POOL_DATA_L_READS - T1.POOL_DATA_L_READS AS POOL_DATA_L_READS
+                , T2.POOL_TEMP_DATA_L_READS - T1.POOL_TEMP_DATA_L_READS AS POOL_TEMP_DATA_L_READS
+                , T2.POOL_XDA_L_READS - T1.POOL_XDA_L_READS AS POOL_XDA_L_READS
+                , T2.POOL_TEMP_XDA_L_READS - T1.POOL_TEMP_XDA_L_READS AS POOL_TEMP_XDA_L_READS
+                , T2.POOL_INDEX_L_READS - T1.POOL_INDEX_L_READS AS POOL_INDEX_L_READS
+                , T2.POOL_TEMP_INDEX_L_READS - T1.POOL_TEMP_INDEX_L_READS AS POOL_TEMP_INDEX_L_READS
+                , T2.POOL_DATA_P_READS - T1.POOL_DATA_P_READS AS POOL_DATA_P_READS
+                , T2.POOL_TEMP_DATA_P_READS - T1.POOL_TEMP_DATA_P_READS AS POOL_TEMP_DATA_P_READS
+                , T2.POOL_XDA_P_READS - T1.POOL_XDA_P_READS AS POOL_XDA_P_READS
+                , T2.POOL_TEMP_XDA_P_READS - T1.POOL_TEMP_XDA_P_READS AS POOL_TEMP_XDA_P_READS
+                , T2.POOL_INDEX_P_READS - T1.POOL_INDEX_P_READS AS POOL_INDEX_P_READS
+                , T2.POOL_TEMP_INDEX_P_READS - T1.POOL_TEMP_INDEX_P_READS AS POOL_TEMP_INDEX_P_READS
+                , T2.POOL_DATA_WRITES - T1.POOL_DATA_WRITES AS POOL_DATA_WRITES
+                , T2.POOL_XDA_WRITES - T1.POOL_XDA_WRITES AS POOL_XDA_WRITES
+                , T2.POOL_INDEX_WRITES - T1.POOL_INDEX_WRITES AS POOL_INDEX_WRITES
+                , T2.DIRECT_READ_TIME - T1.DIRECT_READ_TIME AS DIRECT_READ_TIME
+                , T2.DIRECT_WRITE_TIME - T1.DIRECT_WRITE_TIME AS DIRECT_WRITE_TIME
+                , T2.POOL_READ_TIME - T1.POOL_READ_TIME AS POOL_READ_TIME
+                , T2.POOL_WRITE_TIME - T1.POOL_WRITE_TIME AS POOL_WRITE_TIME
+                , T2.POOL_ASYNC_DATA_READS - T1.POOL_ASYNC_DATA_READS AS POOL_ASYNC_DATA_READS
+                , T2.POOL_ASYNC_DATA_READ_REQS - T1.POOL_ASYNC_DATA_READ_REQS AS POOL_ASYNC_DATA_READ_REQS
+                , T2.POOL_ASYNC_DATA_WRITES - T1.POOL_ASYNC_DATA_WRITES AS POOL_ASYNC_DATA_WRITES
+                , T2.POOL_ASYNC_INDEX_READS - T1.POOL_ASYNC_INDEX_READS AS POOL_ASYNC_INDEX_READS
+                , T2.POOL_ASYNC_INDEX_READ_REQS - T1.POOL_ASYNC_INDEX_READ_REQS AS POOL_ASYNC_INDEX_READ_REQS
+                , T2.POOL_ASYNC_INDEX_WRITES - T1.POOL_ASYNC_INDEX_WRITES AS POOL_ASYNC_INDEX_WRITES
+                , T2.POOL_ASYNC_XDA_READS - T1.POOL_ASYNC_XDA_READS AS POOL_ASYNC_XDA_READS
+                , T2.POOL_ASYNC_XDA_READ_REQS - T1.POOL_ASYNC_XDA_READ_REQS AS POOL_ASYNC_XDA_READ_REQS
+                , T2.POOL_ASYNC_XDA_WRITES - T1.POOL_ASYNC_XDA_WRITES AS POOL_ASYNC_XDA_WRITES
+                , T2.POOL_NO_VICTIM_BUFFER - T1.POOL_NO_VICTIM_BUFFER AS POOL_NO_VICTIM_BUFFER
+                , T2.POOL_LSN_GAP_CLNS - T1.POOL_LSN_GAP_CLNS AS POOL_LSN_GAP_CLNS
+                , T2.POOL_DRTY_PG_STEAL_CLNS - T1.POOL_DRTY_PG_STEAL_CLNS AS POOL_DRTY_PG_STEAL_CLNS
+                , T2.POOL_DRTY_PG_THRSH_CLNS - T1.POOL_DRTY_PG_THRSH_CLNS AS POOL_DRTY_PG_THRSH_CLNS
+                , T2.VECTORED_IOS - T1.VECTORED_IOS AS VECTORED_IOS
+                , T2.PAGES_FROM_VECTORED_IOS - T1.PAGES_FROM_VECTORED_IOS AS PAGES_FROM_VECTORED_IOS
+                , T2.BLOCK_IOS - T1.BLOCK_IOS AS BLOCK_IOS
+                , T2.PAGES_FROM_BLOCK_IOS - T1.PAGES_FROM_BLOCK_IOS AS PAGES_FROM_BLOCK_IOS
+                , T2.UNREAD_PREFETCH_PAGES - T1.UNREAD_PREFETCH_PAGES AS UNREAD_PREFETCH_PAGES
+                , T2.FILES_CLOSED - T1.FILES_CLOSED AS FILES_CLOSED
+                , T2.POOL_DATA_GBP_L_READS - T1.POOL_DATA_GBP_L_READS AS POOL_DATA_GBP_L_READS
+                , T2.POOL_DATA_GBP_P_READS - T1.POOL_DATA_GBP_P_READS AS POOL_DATA_GBP_P_READS
+                , T2.POOL_DATA_LBP_PAGES_FOUND - T1.POOL_DATA_LBP_PAGES_FOUND AS POOL_DATA_LBP_PAGES_FOUND
+                , T2.POOL_DATA_GBP_INVALID_PAGES - T1.POOL_DATA_GBP_INVALID_PAGES AS POOL_DATA_GBP_INVALID_PAGES
+                , T2.POOL_INDEX_GBP_L_READS - T1.POOL_INDEX_GBP_L_READS AS POOL_INDEX_GBP_L_READS
+                , T2.POOL_INDEX_GBP_P_READS - T1.POOL_INDEX_GBP_P_READS AS POOL_INDEX_GBP_P_READS
+                , T2.POOL_INDEX_LBP_PAGES_FOUND - T1.POOL_INDEX_LBP_PAGES_FOUND AS POOL_INDEX_LBP_PAGES_FOUND
+                , T2.POOL_INDEX_GBP_INVALID_PAGES - T1.POOL_INDEX_GBP_INVALID_PAGES AS POOL_INDEX_GBP_INVALID_PAGES
+                , T2.POOL_ASYNC_DATA_GBP_L_READS - T1.POOL_ASYNC_DATA_GBP_L_READS AS POOL_ASYNC_DATA_GBP_L_READS
+                , T2.POOL_ASYNC_DATA_GBP_P_READS - T1.POOL_ASYNC_DATA_GBP_P_READS AS POOL_ASYNC_DATA_GBP_P_READS
+                , T2.POOL_ASYNC_DATA_LBP_PAGES_FOUND - T1.POOL_ASYNC_DATA_LBP_PAGES_FOUND AS POOL_ASYNC_DATA_LBP_PAGES_FOUND
+                , T2.POOL_ASYNC_DATA_GBP_INVALID_PAGES - T1.POOL_ASYNC_DATA_GBP_INVALID_PAGES AS POOL_ASYNC_DATA_GBP_INVALID_PAGES
+                , T2.POOL_ASYNC_INDEX_GBP_L_READS - T1.POOL_ASYNC_INDEX_GBP_L_READS AS POOL_ASYNC_INDEX_GBP_L_READS
+                , T2.POOL_ASYNC_INDEX_GBP_P_READS - T1.POOL_ASYNC_INDEX_GBP_P_READS AS POOL_ASYNC_INDEX_GBP_P_READS
+                , T2.POOL_ASYNC_INDEX_LBP_PAGES_FOUND - T1.POOL_ASYNC_INDEX_LBP_PAGES_FOUND AS POOL_ASYNC_INDEX_LBP_PAGES_FOUND
+                , T2.POOL_ASYNC_INDEX_GBP_INVALID_PAGES - T1.POOL_ASYNC_INDEX_GBP_INVALID_PAGES AS POOL_ASYNC_INDEX_GBP_INVALID_PAGES
+                , T2.POOL_XDA_GBP_L_READS - T1.POOL_XDA_GBP_L_READS AS POOL_XDA_GBP_L_READS
+                , T2.POOL_XDA_GBP_P_READS - T1.POOL_XDA_GBP_P_READS AS POOL_XDA_GBP_P_READS
+                , T2.POOL_XDA_LBP_PAGES_FOUND - T1.POOL_XDA_LBP_PAGES_FOUND AS POOL_XDA_LBP_PAGES_FOUND
+                , T2.POOL_XDA_GBP_INVALID_PAGES - T1.POOL_XDA_GBP_INVALID_PAGES AS POOL_XDA_GBP_INVALID_PAGES
+                , T2.POOL_ASYNC_XDA_GBP_L_READS - T1.POOL_ASYNC_XDA_GBP_L_READS AS POOL_ASYNC_XDA_GBP_L_READS
+                , T2.POOL_ASYNC_XDA_GBP_P_READS - T1.POOL_ASYNC_XDA_GBP_P_READS AS POOL_ASYNC_XDA_GBP_P_READS
+                , T2.POOL_ASYNC_XDA_LBP_PAGES_FOUND - T1.POOL_ASYNC_XDA_LBP_PAGES_FOUND AS POOL_ASYNC_XDA_LBP_PAGES_FOUND
+                , T2.POOL_ASYNC_XDA_GBP_INVALID_PAGES - T1.POOL_ASYNC_XDA_GBP_INVALID_PAGES AS POOL_ASYNC_XDA_GBP_INVALID_PAGES
+                , T2.POOL_ASYNC_READ_TIME - T1.POOL_ASYNC_READ_TIME AS POOL_ASYNC_READ_TIME
+                , T2.POOL_ASYNC_WRITE_TIME - T1.POOL_ASYNC_WRITE_TIME AS POOL_ASYNC_WRITE_TIME
+                , T2.RepetitionCount
+        FROM SESSION.MRT_CheckupBufferPool T1
+        INNER JOIN SESSION.MRT_CheckupBufferPool T2
+               --ON T1.BANCO = T2.BANCO
+                --AND T1.LATCH_NAME = T2.LATCH_NAME
+                ON T1.RepetitionCount < T2.RepetitionCount
+                AND T2.RepetitionCount - T1.RepetitionCount = 1
+                AND T1.BP_NAME = T2.BP_NAME
+        ),CSUM AS ( 
+        SELECT
+                HorarioFim
+                ,HorarioInicio
+                ,BP_NAME
+                ,SUM(POOL_ASYNC_DATA_LBP_PAGES_FOUND) AS POOL_ASYNC_DATA_LBP_PAGES_FOUND
+                ,SUM(POOL_ASYNC_DATA_READS) AS POOL_ASYNC_DATA_READS
+                ,SUM(POOL_ASYNC_INDEX_LBP_PAGES_FOUND) AS POOL_ASYNC_INDEX_LBP_PAGES_FOUND
+                ,SUM(POOL_ASYNC_INDEX_READS) AS POOL_ASYNC_INDEX_READS
+                ,SUM(POOL_ASYNC_READ_TIME) AS POOL_ASYNC_READ_TIME
+                ,SUM(POOL_ASYNC_XDA_LBP_PAGES_FOUND) AS POOL_ASYNC_XDA_LBP_PAGES_FOUND
+                ,SUM(POOL_ASYNC_XDA_READS) AS POOL_ASYNC_XDA_READS 
+                ,SUM(POOL_DATA_LBP_PAGES_FOUND) AS POOL_DATA_LBP_PAGES_FOUND
+                ,SUM(POOL_DATA_L_READS) AS POOL_DATA_L_READS
+                ,SUM(POOL_DATA_P_READS) AS POOL_DATA_P_READS
+                ,SUM(POOL_DATA_WRITES) AS POOL_DATA_WRITES
+                ,SUM(POOL_DRTY_PG_STEAL_CLNS) AS POOL_DRTY_PG_STEAL_CLNS
+                ,SUM(POOL_DRTY_PG_THRSH_CLNS) AS POOL_DRTY_PG_THRSH_CLNS
+                ,SUM(POOL_INDEX_LBP_PAGES_FOUND) AS POOL_INDEX_LBP_PAGES_FOUND
+                ,SUM(POOL_INDEX_L_READS) AS POOL_INDEX_L_READS
+                ,SUM(POOL_INDEX_P_READS) AS POOL_INDEX_P_READS
+                ,SUM(POOL_INDEX_WRITES) AS POOL_INDEX_WRITES
+                ,SUM(POOL_LSN_GAP_CLNS) AS POOL_LSN_GAP_CLNS
+                ,SUM(POOL_READ_TIME) AS POOL_READ_TIME
+                ,SUM(POOL_TEMP_DATA_L_READS) AS POOL_TEMP_DATA_L_READS
+                ,SUM(POOL_TEMP_DATA_P_READS) AS POOL_TEMP_DATA_P_READS
+                ,SUM(POOL_TEMP_INDEX_L_READS) AS POOL_TEMP_INDEX_L_READS
+                ,SUM(POOL_TEMP_INDEX_P_READS) AS POOL_TEMP_INDEX_P_READS
+                ,SUM(POOL_TEMP_XDA_L_READS) AS POOL_TEMP_XDA_L_READS
+                ,SUM(POOL_TEMP_XDA_P_READS) AS POOL_TEMP_XDA_P_READS 
+                ,SUM(POOL_WRITE_TIME) AS POOL_WRITE_TIME
+                ,SUM(POOL_XDA_LBP_PAGES_FOUND) AS POOL_XDA_LBP_PAGES_FOUND
+                ,SUM(POOL_XDA_L_READS) AS POOL_XDA_L_READS
+                ,SUM(POOL_XDA_P_READS) AS POOL_XDA_P_READS
+                ,SUM(POOL_XDA_WRITES) AS POOL_XDA_WRITES
+                ,SUM(UNREAD_PREFETCH_PAGES) AS UNREAD_PREFETCH_PAGES
+                ,RepetitionCount
+        FROM DIFF
+         GROUP BY HorarioFim, HorarioInicio, BP_NAME, RepetitionCount 
+        )
+        SELECT  HorarioInicio
+                , HorarioFim
+                , BP_NAME
+                , (POOL_DATA_L_READS + POOL_TEMP_DATA_L_READS + POOL_INDEX_L_READS + POOL_TEMP_INDEX_L_READS + POOL_XDA_L_READS + POOL_TEMP_XDA_L_READS) AS TOTAL_LOGICAL_READS
+                , (POOL_DATA_P_READS + POOL_TEMP_DATA_P_READS + POOL_INDEX_P_READS + POOL_TEMP_INDEX_P_READS + POOL_XDA_P_READS + POOL_TEMP_XDA_P_READS) AS TOTAL_PHYSICAL_READS
+                ,(POOL_DATA_LBP_PAGES_FOUND - POOL_ASYNC_DATA_LBP_PAGES_FOUND) + (POOL_DATA_L_READS + POOL_TEMP_DATA_L_READS) AS POOL_DATA_READS
+                ,(POOL_INDEX_LBP_PAGES_FOUND - POOL_ASYNC_INDEX_LBP_PAGES_FOUND ) + POOL_INDEX_L_READS + POOL_TEMP_INDEX_L_READS AS POOL_INDEX_READS
+                ,(POOL_XDA_LBP_PAGES_FOUND - POOL_ASYNC_XDA_LBP_PAGES_FOUND ) + POOL_XDA_L_READS + POOL_TEMP_XDA_L_READS AS POOL_XDA_READS
+                , POOL_DATA_WRITES + POOL_INDEX_WRITES + POOL_XDA_WRITES AS TOTAL_WRITES
+                , CASE 
+                        WHEN POOL_DATA_LBP_PAGES_FOUND > 0
+                        THEN (DEC((POOL_DATA_LBP_PAGES_FOUND - POOL_ASYNC_DATA_LBP_PAGES_FOUND) + (POOL_DATA_L_READS + POOL_TEMP_DATA_L_READS),10,2) /
+                                                 DEC(((POOL_DATA_LBP_PAGES_FOUND - POOL_ASYNC_DATA_LBP_PAGES_FOUND) + (POOL_DATA_L_READS + POOL_TEMP_DATA_L_READS) 
+                                                + (POOL_INDEX_LBP_PAGES_FOUND - POOL_ASYNC_INDEX_LBP_PAGES_FOUND ) + (POOL_INDEX_L_READS + POOL_TEMP_INDEX_L_READS) 
+                                                + (POOL_XDA_LBP_PAGES_FOUND - POOL_ASYNC_XDA_LBP_PAGES_FOUND ) + (POOL_XDA_L_READS + POOL_TEMP_XDA_L_READS)),10,2) * 100.0)
+                        ELSE 0
+                 END AS PCT_DATA_LBP_READS 
+                , CASE 
+                        WHEN POOL_DATA_LBP_PAGES_FOUND > 0
+                        THEN DEC((DEC((POOL_INDEX_LBP_PAGES_FOUND - POOL_ASYNC_INDEX_LBP_PAGES_FOUND ) + (POOL_INDEX_L_READS + POOL_TEMP_INDEX_L_READS),10,2) /
+                                                 ((POOL_DATA_LBP_PAGES_FOUND - POOL_ASYNC_DATA_LBP_PAGES_FOUND) + (POOL_DATA_L_READS + POOL_TEMP_DATA_L_READS) 
+                                                + (POOL_INDEX_LBP_PAGES_FOUND - POOL_ASYNC_INDEX_LBP_PAGES_FOUND ) + (POOL_INDEX_L_READS + POOL_TEMP_INDEX_L_READS) 
+                                                + (POOL_XDA_LBP_PAGES_FOUND - POOL_ASYNC_XDA_LBP_PAGES_FOUND ) + (POOL_XDA_L_READS + POOL_TEMP_XDA_L_READS)) * 100.0),10,2)
+                        ELSE 0
+                 END AS PCT_IDX_LBP_READS 
+                , CASE 
+                        WHEN POOL_DATA_LBP_PAGES_FOUND > 0
+                        THEN DEC((DEC((POOL_XDA_LBP_PAGES_FOUND - POOL_ASYNC_XDA_LBP_PAGES_FOUND ) + (POOL_XDA_L_READS + POOL_TEMP_XDA_L_READS),10,2) /
+                                                 ((POOL_DATA_LBP_PAGES_FOUND - POOL_ASYNC_DATA_LBP_PAGES_FOUND) + (POOL_DATA_L_READS + POOL_TEMP_DATA_L_READS) 
+                                                + (POOL_INDEX_LBP_PAGES_FOUND - POOL_ASYNC_INDEX_LBP_PAGES_FOUND ) + (POOL_INDEX_L_READS + POOL_TEMP_INDEX_L_READS) 
+                                                + (POOL_XDA_LBP_PAGES_FOUND - POOL_ASYNC_XDA_LBP_PAGES_FOUND ) + (POOL_XDA_L_READS + POOL_TEMP_XDA_L_READS)) * 100.0),10,2)
+                        ELSE 0
+                 END AS PCT_XDA_LBP_READS
+                , CASE
+                        WHEN POOL_DATA_L_READS > 0
+                        THEN DEC((((POOL_DATA_LBP_PAGES_FOUND + POOL_INDEX_LBP_PAGES_FOUND + POOL_XDA_LBP_PAGES_FOUND 
+                                - POOL_ASYNC_DATA_LBP_PAGES_FOUND - POOL_ASYNC_INDEX_LBP_PAGES_FOUND - POOL_ASYNC_XDA_LBP_PAGES_FOUND) 
+                                / DEC((POOL_DATA_L_READS + POOL_INDEX_L_READS + POOL_XDA_L_READS + POOL_TEMP_DATA_L_READS + POOL_TEMP_XDA_L_READS + POOL_TEMP_INDEX_L_READS),10,2)) * 100.0),10,2) 
+                  END AS BP_HIT_RATIO
+        
+                , CASE
+                        WHEN POOL_DATA_LBP_PAGES_FOUND > 0
+                        THEN DEC(((POOL_DATA_LBP_PAGES_FOUND - POOL_ASYNC_DATA_LBP_PAGES_FOUND) / ((POOL_DATA_L_READS + POOL_TEMP_DATA_L_READS) * 1.0)) * 100,10,2)
+                        ELSE 0
+                  END AS BP_DATA_HIT_RATIO
+                , CASE
+                        WHEN POOL_INDEX_LBP_PAGES_FOUND > 0
+                        THEN DEC(((POOL_INDEX_LBP_PAGES_FOUND - POOL_ASYNC_INDEX_LBP_PAGES_FOUND ) / ((POOL_INDEX_L_READS + POOL_TEMP_INDEX_L_READS) * 1.0)) * 100.0,10,2)
+                        ELSE 0
+                  END AS BP_IDX_HIT_RATIO
+                , CASE
+                        WHEN POOL_XDA_LBP_PAGES_FOUND > 0
+                        THEN DEC(((POOL_XDA_LBP_PAGES_FOUND - POOL_ASYNC_XDA_LBP_PAGES_FOUND ) / ((POOL_XDA_L_READS + POOL_TEMP_XDA_L_READS) * 1.0)) * 100.0,10,2)
+                        ELSE 0
+                  END AS BP_XDA_HIT_RATIO
+                , CASE
+                        WHEN POOL_READ_TIME > 0
+                        THEN DEC(POOL_READ_TIME / (POOL_DATA_P_READS + POOL_TEMP_DATA_P_READS + POOL_INDEX_P_READS + POOL_TEMP_INDEX_P_READS + POOL_XDA_P_READS 
+                                + POOL_TEMP_XDA_P_READS),10,2)
+                        ELSE 0 
+                 END AS AVG_PHYSICAL_READ_TIME_MS
+                , CASE 
+                        WHEN POOL_ASYNC_READ_TIME > 0
+                        THEN DEC(POOL_ASYNC_READ_TIME / (((POOL_ASYNC_DATA_READS + POOL_ASYNC_INDEX_READS) * 1.0)),10,2) 
+                        ELSE 0 
+                 END AS AVG_ASYNC_READ_TIME_MS
+                , CASE 
+                        WHEN POOL_WRITE_TIME > 0
+                        THEN DEC(POOL_WRITE_TIME / ((POOL_DATA_WRITES + POOL_INDEX_WRITES + POOL_XDA_WRITES) * 1.0),10,2)
+                        ELSE 0
+                  END AS AVG_WRITE_TIME_MS
+                , CASE 
+                        WHEN UNREAD_PREFETCH_PAGES > 0
+                        THEN DEC(((UNREAD_PREFETCH_PAGES / ((POOL_ASYNC_DATA_READS + POOL_ASYNC_INDEX_READS + POOL_ASYNC_XDA_READS) * 1.0)) * 100.0),10,2)
+                        ELSE 0
+                 END AS PCT_ASYNC_NOT_READ
+                , CASE 
+                        WHEN POOL_DRTY_PG_STEAL_CLNS > 0 
+                        THEN DEC((POOL_DRTY_PG_STEAL_CLNS / ((POOL_DRTY_PG_STEAL_CLNS + POOL_DRTY_PG_THRSH_CLNS + POOL_LSN_GAP_CLNS) * 1.0) * 100.0),10,2)
+                        ELSE 0
+                  END AS PCT_DRTY_PG_STEAL
+                , CASE 
+                        WHEN POOL_DRTY_PG_THRSH_CLNS > 0 
+                        THEN DEC((POOL_DRTY_PG_THRSH_CLNS / ((POOL_DRTY_PG_STEAL_CLNS + POOL_DRTY_PG_THRSH_CLNS + POOL_LSN_GAP_CLNS) * 1.0) * 100.0))
+                        ELSE 0
+                  END AS PCT_DRTY_PG_THRSH_CLNS
+                , CASE 
+                        WHEN POOL_LSN_GAP_CLNS > 0 
+                        THEN DEC((POOL_LSN_GAP_CLNS / ((POOL_DRTY_PG_STEAL_CLNS + POOL_DRTY_PG_THRSH_CLNS + POOL_LSN_GAP_CLNS) * 1.0) * 100.0),10,2)
+                        ELSE 0
+                  END AS PCT_LSN_GAP_CLNS
+                , CASE
+                        WHEN (POOL_INDEX_P_READS + POOL_TEMP_INDEX_P_READS) > 0 AND (POOL_DATA_P_READS + POOL_TEMP_DATA_P_READS) > 0
+                        THEN DEC((((POOL_INDEX_P_READS + POOL_TEMP_INDEX_P_READS) / ((POOL_DATA_P_READS + POOL_TEMP_DATA_P_READS) * 1.0)) * 100.0),10,2)
+                        ELSE 0
+                  END AS PCT_INDEX_P_OVER_DATA_P_READS
+                , (POOL_DATA_P_READS + POOL_TEMP_DATA_P_READS)  AS DATA_PHYSICAL_READS
+                , (POOL_INDEX_P_READS + POOL_TEMP_INDEX_P_READS) AS INDEX_PHYSICAL_READS
+                , (POOL_XDA_P_READS + POOL_TEMP_XDA_P_READS) AS XDA_PHYSICAL_READS
+                ,'REP' || RepetitionCount AS RepetitionCount
+        FROM CSUM 
+        ORDER BY HorarioInicio;
+   
+    OPEN cReT;
+    
+END P2;
+END P1
+
+/*
+CALL NULLID.MRT_CheckupBufferPool ();
+CALL NULLID.MRT_CheckupBufferPool (1, 10);
+*/
+#/    
+
+
+ 
